@@ -18,20 +18,28 @@ class List {
 
         Node() = default;
 
+        Node(const T& x): data(x) {
+        
+        }
+
+
+
+        Node(T&& x): data(x) {}
+
         void unlink() {
 
             if(next != nullptr and prev != nullptr) {
                 next->prev = prev;
-                prev -> next = next;
+                prev->next = next;
             }
 
             if(next == nullptr and prev != nullptr) {
-                prev -> next = nullptr;
+                prev->next = nullptr;
             }
 
             if(next != nullptr and prev == nullptr) {
                 next->prev = prev;
-                prev -> next = next;
+                prev->next = next;
             }
 
             next = nullptr;
@@ -45,9 +53,20 @@ class List {
         private:
             Node* ptr;
         public:
+            friend class List;
             using iterator_type = std::forward_iterator_tag;
+            using Pointer = Node*;
 
             common_iterator(Node* ptr): ptr(ptr) {}
+
+            common_iterator(const common_iterator& another): ptr(another.ptr) {}
+
+            ~common_iterator() = default;
+
+            common_iterator& operator=(const common_iterator& another) {
+                ptr = another.ptr;
+                return *this;
+            }
 
             T& operator*() {
                 return ptr->data;
@@ -67,8 +86,17 @@ class List {
                 return *this;
             }
 
-        
+            bool operator==(common_iterator another) {
+                return ptr == another.ptr;
+            }
+
+            bool operator!=(common_iterator another) {
+                return ptr != another.ptr;
+            }
+
     };
+
+    Alloc listalloc;
 
     using AllocType = typename std::allocator_traits<Alloc>:: template rebind_alloc<Node>;
     AllocType nodealloc;
@@ -82,14 +110,10 @@ class List {
     Node* end_ptr;
     Node* begin_ptr;
 
-    List() {
-        end_ptr = typename std::allocator_traits<AllocType>::allocate(nodealloc, 1);
-        typename std::allocator_traits<AllocType>::construct(nodealloc, end_ptr);
+    Node* rbegin_ptr;
+    Node* rend_ptr;
 
-        begin_ptr = end_ptr;
-
-    }
-
+public:
     iterator begin() {
         return iterator(begin_ptr);
     }
@@ -97,10 +121,62 @@ class List {
     iterator end() {
         return iterator(end_ptr);
     }
-    //...
 
-    void insert() {
+    iterator rbegin() {
+        return reverse_iterator(rbegin_ptr);
+    }
+
+    iterator rend() {
+        return reverse_iterator(rend);
+    }
+
+    List() {
+        end_ptr = std::allocator_traits<AllocType>::allocate(nodealloc, 1);
+        std::allocator_traits<AllocType>::construct(nodealloc, end_ptr);
+
+        begin_ptr = end_ptr;
+
+    }
+
+    List(Alloc& alloc): listalloc(std::allocator_traits<Alloc>::select_on_container_copy_construction(alloc)) {
+        end_ptr = typename std::allocator_traits<AllocType>::allocate(nodealloc, 1);
+        typename std::allocator_traits<AllocType>::construct(nodealloc, end_ptr);
+
+        begin_ptr = end_ptr;
+
+    }
+
+    template<typename U>
+    void push_front(U&& value) {
+        Node* begin_ptr;
+
+        Node* newnode = typename std::allocator_traits<AllocType>::allocate(nodealloc, 1);
+        std::allocator_traits<AllocType>::construct(nodealloc, newnode, std::move(value));
+
+        insert(begin(), newnode);
+    }
+
+    template<typename U>
+    void insert(iterator it, U&& value) {
         
+        Node* newnode = std::allocator_traits<AllocType>::allocate(nodealloc, 1);
+        std::allocator_traits<AllocType>::construct(nodealloc, newnode, std::move(value));
+
+        if(it == begin()) {
+            
+            it.ptr->prev = newnode;
+            newnode->next = it.ptr;
+            begin_ptr = newnode;           
+            
+        }
+
+        if(begin_ptr != end_ptr) {
+            newnode->prev = it.ptr->prev;
+            newnode->prev->next = newnode;
+
+            newnode->next = it.ptr;
+            newnode->next->prev = newnode;
+        }
     }
 
     void erase() {
@@ -154,6 +230,23 @@ class hash_map {
 
 
 int main() {
+
+    List<int> mylist;
+
+    mylist.insert(mylist.begin(), 3);
+    mylist.insert(mylist.end(), 9);
+    //mylist.insert(mylist.end(), 10);
+
+    mylist.insert(mylist.begin(), 33);
+
+
+    for(auto it: mylist) {
+        std::cout << it << std::endl;
+    }
+
+
+    //std::cout << *(mylist.begin());
+
 
 }
 
