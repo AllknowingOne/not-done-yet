@@ -2,12 +2,14 @@
 #include <memory>
 #include <iostream>
 #include <utility>
+#include <map>
 
 
 
 template< typename T, typename Alloc = std::allocator<T> >
 class List {
-
+    size_t sz = 0;
+public:
     struct Node {
         Node* next = nullptr;
         Node* prev = nullptr;
@@ -18,19 +20,15 @@ class List {
 
         Node() = default;
 
-        Node(const T& x): data(x) {
-        
-        }
+        Node(const T& x): data(x) {}
 
-
-
-        Node(T&& x): data(x) {}
+        Node(T&& x): data(std::move(x)) {}
 
         void unlink() {
 
             if(next != nullptr and prev != nullptr) {
-                next->prev = prev;
-                prev->next = next;
+                next->prev = this->prev;
+                prev->next = this->next;
             }
 
             if(next == nullptr and prev != nullptr) {
@@ -38,24 +36,25 @@ class List {
             }
 
             if(next != nullptr and prev == nullptr) {
-                next->prev = prev;
-                prev->next = next;
+                next->prev = nullptr;
             }
 
-            next = nullptr;
-            prev = nullptr;
-
+            this->next = nullptr;//Is it really needed?
+            this->prev = nullptr;
         }
-    };
 
+    };
+private:
     template<bool IsConst>
     struct common_iterator {
         private:
-            Node* ptr;
+            Node* ptr = nullptr;
         public:
             friend class List;
-            using iterator_type = std::forward_iterator_tag;
+            using iterator_type = std::bidirectional_iterator_tag;
             using Pointer = Node*;
+
+            common_iterator() = default;
 
             common_iterator(Node* ptr): ptr(ptr) {}
 
@@ -96,17 +95,17 @@ class List {
 
     };
 
-    Alloc listalloc;
+    Alloc list_alloc;
 
     using AllocType = typename std::allocator_traits<Alloc>:: template rebind_alloc<Node>;
     AllocType nodealloc;
-
+public:
     using iterator = common_iterator<false>;
     using const_iterator = common_iterator<true>;
 
     using reverse_iterator = std::reverse_iterator<iterator>;
     using const_reverse_iterator = std::reverse_iterator<const_iterator>;
-
+private:
     Node* end_ptr;
     Node* begin_ptr;
 
@@ -138,18 +137,18 @@ public:
 
     }
 
-    List(Alloc& alloc): listalloc(std::allocator_traits<Alloc>::select_on_container_copy_construction(alloc)) {
-        end_ptr = typename std::allocator_traits<AllocType>::allocate(nodealloc, 1);
-        typename std::allocator_traits<AllocType>::construct(nodealloc, end_ptr);
+    List(Alloc& alloc): list_alloc(alloc/*std::allocator_traits<Alloc>::select_on_container_copy_construction(alloc)*/) {
+        end_ptr = std::allocator_traits<AllocType>::allocate(nodealloc, 1);
+        std::allocator_traits<AllocType>::construct(nodealloc, end_ptr);
 
         begin_ptr = end_ptr;
 
     }
+    //Define copy/move constructors in the future for unordered_map copy/move operations.
 
     template<typename U>
     void push_front(U&& value) {
-        Node* begin_ptr;
-
+        
         Node* newnode = typename std::allocator_traits<AllocType>::allocate(nodealloc, 1);
         std::allocator_traits<AllocType>::construct(nodealloc, newnode, std::move(value));
 
@@ -177,12 +176,33 @@ public:
             newnode->next = it.ptr;
             newnode->next->prev = newnode;
         }
+        ++sz;
     }
 
-    void erase() {
+    template<typename U>
+    void push_back(U&& value) {
+        Node* newnode = std::allocator_traits<AllocType>::allocate(nodealloc, 1);
+        std::allocator_traits<AllocType>::construct(nodealloc, newnode, std::move(value));
 
+        insert(end(), *newnode);
     }
 
+    void erase(iterator it) {
+
+        if(it.ptr == begin_ptr) {
+            begin_ptr = it.ptr->next;
+        }
+
+        it.ptr->unlink();
+
+        std::allocator_traits<AllocType>::destroy(nodealloc, it.ptr);
+        std::allocator_traits<AllocType>::deallocate(nodealloc, it.ptr, 1);
+        --sz;
+    }
+
+    size_t size() {
+        return sz;
+    }
 };
 
 //being() == NodeList::iterator(storage[hash(key)%size]]);
@@ -209,20 +229,72 @@ class hash_map {
     using pointer = typename std::allocator_traits<Allocator>::pointer;
     using const_pointer = typename std::allocator_traits<Allocator>::const_pointer;  
 
+
+    
+
     double load_factor = 0;     /* size/number of buckets */
     double max_load_factor = 0.8;
 
     size_type element_count = 0;
     size_type bucket_count = 0;
 
+    std::vector<List<value_type, Allocator>*> storage;
+    Hash hash;
+
+    // typename List<mapped_type, Allocator>::Node* global_begin;
+    // typename List<mapped_type, Allocator>::Node* global_end;
+    typename List<value_type, Allocator>::iterator global_begin;
+    typename List<value_type, Allocator>::iterator global_end;
+
+
     allocator_type alloc;
-
-    
-
+    // using ListAllocType = std::allocator_traits<allocator_type>::
 
 
 
+public:
+    hash_map(): storage(10) {
+        
+    }
 
+    auto begin() {
+        return global_begin;
+    }
+
+
+    mapped_type operator[](key_type key) {
+        //is half wrong
+        //should return a reference
+        size_t bucket_index = hash(key) % storage.size();
+
+        for(auto it: *(storage[bucket_index])) {
+            if(it.first == key) {
+                return it.second;
+            }
+        }
+        return 0;
+    }
+
+    void insert(const key_type key, T value) {
+        int hashed = hash(key) % storage.size();
+
+        if(storage[hashed] == nullptr) {
+            ++bucket_count;
+            
+            using ListAllocType = typename std::allocator_traits<allocator_type>:: template rebind_alloc<List<value_type>>;
+            ListAllocType listalloc;
+            storage[hashed] = std::allocator_traits<ListAllocType>::allocate(listalloc, 1);
+            std::allocator_traits<ListAllocType>::construct(listalloc, storage[hashed], alloc);
+
+            (storage[hashed])->push_back(std::make_pair(key, value));
+
+            //global_begin = *(storage[hashed]).begin_ptr;
+            global_begin = (storage[hashed])->begin();
+
+        } else {
+            storage[hashed]->push_back(std::make_pair(key, value));
+        }
+    }
 };
 
 
@@ -231,21 +303,18 @@ class hash_map {
 
 int main() {
 
-    List<int> mylist;
+    hash_map<int, int> hm;
 
-    mylist.insert(mylist.begin(), 3);
-    mylist.insert(mylist.end(), 9);
-    //mylist.insert(mylist.end(), 10);
-
-    mylist.insert(mylist.begin(), 33);
-
-
-    for(auto it: mylist) {
-        std::cout << it << std::endl;
-    }
+    hm.insert(5, 9);
+    hm.insert(15, 3);
+    auto [key, value] = *hm.begin();
+    std::cout << value;
 
 
-    //std::cout << *(mylist.begin());
+
+
+
+
 
 
 }
