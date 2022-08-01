@@ -47,7 +47,7 @@ public:
 private:
     template<bool IsConst>
     struct common_iterator {
-        private:
+        public://private:
             Node* ptr = nullptr;
         public:
             friend class List;
@@ -72,7 +72,7 @@ private:
             }
 
             T* operator->() {
-                return ptr;
+                return &ptr->data;
             }
 
             common_iterator& operator++() {
@@ -144,6 +144,16 @@ public:
         begin_ptr = end_ptr;
 
     }
+
+
+
+    List(Alloc& alloc, iterator end, T&& value): list_alloc(alloc), end_ptr(end.ptr) {
+        begin_ptr = std::allocator_traits<AllocType>::allocate(nodealloc, 1);
+        std::allocator_traits<AllocType>::construct(nodealloc, begin_ptr, std::forward<T>(value));
+
+        end_ptr->prev = begin_ptr;
+        begin_ptr->next = end_ptr;
+    }
     //Define copy/move constructors in the future for unordered_map copy/move operations.
 
     template<typename U>
@@ -155,11 +165,11 @@ public:
         insert(begin(), newnode);
     }
 
-    template<typename U>
-    void insert(iterator it, U&& value) {
+    //template<typename U>
+    void insert(iterator it, Node* newnode/*U&& value*/) {
         
-        Node* newnode = std::allocator_traits<AllocType>::allocate(nodealloc, 1);
-        std::allocator_traits<AllocType>::construct(nodealloc, newnode, std::move(value));
+        // Node* newnode = std::allocator_traits<AllocType>::allocate(nodealloc, 1);
+        // std::allocator_traits<AllocType>::construct(nodealloc, newnode, std::move(value));
 
         if(it == begin()) {
             
@@ -176,15 +186,18 @@ public:
             newnode->next = it.ptr;
             newnode->next->prev = newnode;
         }
+        //end_ptr->prev = newnode;
         ++sz;
     }
 
     template<typename U>
     void push_back(U&& value) {
         Node* newnode = std::allocator_traits<AllocType>::allocate(nodealloc, 1);
-        std::allocator_traits<AllocType>::construct(nodealloc, newnode, std::move(value));
+        std::allocator_traits<AllocType>::construct(nodealloc, newnode, std::forward<U>(value));
 
-        insert(end(), *newnode);
+        insert(end(), newnode/*newnode*/);
+
+        
     }
 
     void erase(iterator it) {
@@ -243,8 +256,9 @@ class hash_map {
 
     // typename List<mapped_type, Allocator>::Node* global_begin;
     // typename List<mapped_type, Allocator>::Node* global_end;
-    typename List<value_type, Allocator>::iterator global_begin;
-    typename List<value_type, Allocator>::iterator global_end;
+    using iterator_type = typename List<value_type, Allocator>::iterator;
+    iterator_type global_begin;
+    iterator_type global_end;
 
 
     allocator_type alloc;
@@ -261,39 +275,62 @@ public:
         return global_begin;
     }
 
-
-    mapped_type operator[](key_type key) {
-        //is half wrong
-        //should return a reference
-        size_t bucket_index = hash(key) % storage.size();
-
-        for(auto it: *(storage[bucket_index])) {
-            if(it.first == key) {
-                return it.second;
-            }
-        }
-        return 0;
+    auto end() {
+        return global_end;
     }
 
-    void insert(const key_type key, T value) {
-        int hashed = hash(key) % storage.size();
 
-        if(storage[hashed] == nullptr) {
-            ++bucket_count;
+    mapped_type& operator[](const key_type& key) {
+
+        auto [it, second] = insert(key, mapped_type());
+        
+        return it->second;
+    }
+
+    //TODO: change iterator type
+    std::pair<iterator_type, bool> insert(const key_type key, T value) {
+        int bucket_index = hash(key) % storage.size();
+
+        if(storage[bucket_index] == nullptr) {//if there are no such bucket yet
             
             using ListAllocType = typename std::allocator_traits<allocator_type>:: template rebind_alloc<List<value_type>>;
             ListAllocType listalloc;
-            storage[hashed] = std::allocator_traits<ListAllocType>::allocate(listalloc, 1);
-            std::allocator_traits<ListAllocType>::construct(listalloc, storage[hashed], alloc);
+            storage[bucket_index] = std::allocator_traits<ListAllocType>::allocate(listalloc, 1);//created List(bucket)
+            
+            if(bucket_count == 0) {//if bucket_count = 0
+                std::allocator_traits<ListAllocType>::construct(listalloc, storage[bucket_index], alloc);
+                (storage[bucket_index])->push_back(std::make_pair(key, value));
+                global_end = (storage[bucket_index])->end();
 
-            (storage[hashed])->push_back(std::make_pair(key, value));
+            } else {
+                std::allocator_traits<ListAllocType>::construct(listalloc, storage[bucket_index], alloc, global_begin,
+                                        std::forward<value_type>(std::make_pair(key, value)));
+            }
+            global_begin = (storage[bucket_index])->begin();
+            
+            ++bucket_count;
+            return {(storage[bucket_index])->begin(), true};
+        } else {//if there is suck bucket already
+            for(iterator_type it = storage[bucket_index]->begin(); it != storage[bucket_index]->end(); ++it) {
+                if(it->first == key) {
+                    return {it,false};
+                }
+            }
 
-            //global_begin = *(storage[hashed]).begin_ptr;
-            global_begin = (storage[hashed])->begin();
-
-        } else {
-            storage[hashed]->push_back(std::make_pair(key, value));
+            storage[bucket_index]->push_back(std::make_pair(key, value));
+            return {--(storage[bucket_index]->end()), true};//KEKW
         }
+    }
+
+
+    //template<typename IteratorType>
+    void erase(const key_type& key) {
+        int bucket_index = hash(key) % storage.size();
+
+        // for() {
+
+        // }
+
     }
 };
 
@@ -305,17 +342,17 @@ int main() {
 
     hash_map<int, int> hm;
 
+    hm.insert(1, 1);
     hm.insert(5, 9);
-    hm.insert(15, 3);
-    auto [key, value] = *hm.begin();
-    std::cout << value;
+    hm.insert(4, 8);
+    hm.insert(14, 3);
+    hm.insert(11, 2);
+    
+    hm[5] = 0;
 
-
-
-
-
-
-
+    for(auto it: hm) {
+        std::cout << it.second;
+    }
 
 }
 
